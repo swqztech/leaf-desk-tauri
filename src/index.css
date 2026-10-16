@@ -1,0 +1,72 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@400;500;600;700&display=swap');
+
+:root {
+  --ink: #14201a;
+  --ink-muted: #4a5c52;
+  --paper: #f3f6f2;
+  --paper-raised: #ffffff;
+  --leaf: #1f7a4d;
+  --leaf-soft: #d8efe3;
+  --leaf-bright: #2ea86a;
+  --line: #d0ddd4;
+  --danger: #b42318;
+  --danger-soft: #fce8e6;
+  --sidebar: #101a15;
+  --sidebar-text: #c5d4cb;
+  --sidebar-muted: #7a8f82;
+  --sidebar-active: #1a2e24;
+  --json-key: #1f7a4d;
+  --json-string: #0b5cab;
+  --json-number: #9a3412;
+  --json-bool: #7c3aed;
+  --shadow: 0 12px 40px rgba(16, 26, 21, 0.08);
+  --radius: 10px;
+  --font-ui: 'Sora', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #b7c7bc;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
