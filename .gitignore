@@ -3,6 +3,7 @@ dist/
 mongo-server/node_modules/
 mongo-server/dist/
 src-tauri/target/
+dist-portable/
 src-tauri/resources/mongo-api/node.exe
 src-tauri/resources/mongo-api/server.cjs
 src-tauri/resources/mongo-api/node_modules/
