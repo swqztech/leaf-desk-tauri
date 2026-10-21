@@ -333,7 +333,7 @@ export default function App() {
     setIoLabel(`正在导出数据库「${db}」`)
     try {
       const { blob, fileName } = await api.exportDatabase(db)
-      downloadBlob(blob, fileName)
+      await downloadBlob(blob, fileName)
       toast.success(`已导出数据库「${db}」（宝塔兼容 zip）：${fileName}`)
     } catch (err) {
       toast.error(err)
@@ -347,7 +347,7 @@ export default function App() {
     setIoLabel(`正在导出集合「${db}.${coll}」`)
     try {
       const { blob, fileName } = await api.exportCollection(db, coll)
-      downloadBlob(blob, fileName)
+      await downloadBlob(blob, fileName)
       toast.success(`已导出集合「${db}.${coll}」（宝塔兼容 zip）：${fileName}`)
     } catch (err) {
       toast.error(err)

@@ -17,6 +17,29 @@ fn leaf_data_dir() -> PathBuf {
         .join("Leaf Desk")
 }
 
+fn mongodump_marker_in(bin_dir: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        bin_dir.join("mongodump.exe")
+    }
+    #[cfg(not(windows))]
+    {
+        bin_dir.join("mongodump")
+    }
+}
+
+fn mongo_tools_bin_dir(api_dir: &Path) -> Option<PathBuf> {
+    let bin = api_dir.join("tools").join("bin");
+    if mongodump_marker_in(&bin).is_file() {
+        return Some(bin);
+    }
+    None
+}
+
+fn bundled_mongo_api_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join("mongo-api")
+}
+
 pub fn spawn_mongo_api(app: &AppHandle) -> Result<(), String> {
     let data = leaf_data_dir();
     let _ = std::fs::create_dir_all(&data);
@@ -40,7 +63,18 @@ pub fn spawn_mongo_api(app: &AppHandle) -> Result<(), String> {
         return Err("Mongo API not built: run npm run build:api from project root.".into());
     }
     let node = which_node()?;
-    let cwd = manifest.join("../mongo-server");
+    let bundled_api = bundled_mongo_api_dir();
+    let (node, script, cwd) = if bundled_api.join("node.exe").is_file()
+        && bundled_api.join("server.cjs").is_file()
+    {
+        (
+            bundled_api.join("node.exe"),
+            bundled_api.join("server.cjs"),
+            bundled_api.clone(),
+        )
+    } else {
+        (node, script, manifest.join("../mongo-server"))
+    };
     spawn_node_process(&node, &script, &cwd, &data)
 }
 
@@ -76,6 +110,9 @@ fn spawn_node_process(
         .env("LEAF_DESK_DATA", data_dir)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    if let Some(tools_bin) = mongo_tools_bin_dir(cwd) {
+        cmd.env("MONGO_TOOLS_DIR", tools_bin);
+    }
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
 

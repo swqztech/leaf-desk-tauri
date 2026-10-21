@@ -10,5 +10,7 @@ src-tauri/resources/mongo-api/node_modules/
 src-tauri/resources/mongo-api/package.json
 src-tauri/resources/mongo-api/*.zip
 src-tauri/resources/mongo-api/_extract/
+src-tauri/resources/mongo-api/_tools_extract/
+src-tauri/resources/mongo-api/tools/
 *.log
 tsconfig.tsbuildinfo

@@ -1,7 +1,10 @@
 mod local_storage;
 mod sidecar;
 
+use std::fs;
+use std::path::Path;
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 #[tauri::command]
@@ -17,6 +20,37 @@ fn open_path(app: tauri::AppHandle, path: String) -> Result<bool, String> {
         .open_path(path, None::<&str>)
         .map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// 导出备份：弹出保存对话框并写入 zip
+#[tauri::command]
+async fn save_export_file(
+    app: tauri::AppHandle,
+    file_name: String,
+    data: Vec<u8>,
+) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("保存 MongoDB 备份")
+        .set_file_name(
+            Path::new(&file_name)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("backup.zip"),
+        )
+        .add_filter("ZIP 备份", &["zip"])
+        .blocking_save_file();
+    let Some(file) = picked else {
+        return Ok(None);
+    };
+    let path = file
+        .into_path()
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .to_string();
+    fs::write(&path, &data).map_err(|e| e.to_string())?;
+    Ok(Some(path))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -37,6 +71,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             show_item_in_folder,
             open_path,
+            save_export_file,
             local_storage::import_electron_local_storage,
         ])
         .run(tauri::generate_context!())

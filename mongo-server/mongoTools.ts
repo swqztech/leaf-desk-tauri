@@ -3,9 +3,27 @@ import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
+
+/** 打包后的 server.cjs 与开发时 mongo-server 根目录 */
+function apiRuntimeRoots(): string[] {
+  const roots: string[] = []
+  if (typeof __dirname === 'string') {
+    roots.push(__dirname)
+    roots.push(path.join(__dirname, '..'))
+  }
+  try {
+    const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+    roots.push(moduleDir)
+    roots.push(path.join(moduleDir, '..'))
+  } catch {
+    // CJS bundle 无 import.meta
+  }
+  return [...new Set(roots)]
+}
 
 function pad(n: number) {
   return String(n).padStart(2, '0')
@@ -42,6 +60,10 @@ export async function resolveMongoTool(tool: 'mongodump' | 'mongorestore') {
   if (process.env.MONGO_TOOLS_DIR) {
     candidates.push(path.join(process.env.MONGO_TOOLS_DIR, exeName))
   }
+  for (const root of apiRuntimeRoots()) {
+    candidates.push(path.join(root, 'tools', 'bin', exeName))
+    candidates.push(path.join(root, 'tools', exeName))
+  }
   candidates.push(path.join(process.cwd(), 'tools', 'bin', exeName))
   candidates.push(path.join(process.cwd(), 'tools', exeName))
 
@@ -55,6 +77,12 @@ export async function resolveMongoTool(tool: 'mongodump' | 'mongorestore') {
       exeName,
     ),
   )
+  if (process.platform === 'win32') {
+    candidates.push(
+      path.join('C:\\Program Files\\MongoDB\\Tools\\100\\bin', exeName),
+      path.join('C:\\mongodb\\bin', exeName),
+    )
+  }
 
   for (const item of candidates) {
     const hit = await pathIfExists(item)
@@ -74,7 +102,7 @@ export async function resolveMongoTool(tool: 'mongodump' | 'mongorestore') {
   }
 
   throw new Error(
-    `未找到 ${tool}。请安装 MongoDB Database Tools，并把 bin 目录设到环境变量 MONGO_TOOLS_DIR`,
+    `未找到 ${tool}。请重新执行 npm run build:api 以内置 Database Tools，或安装 MongoDB Database Tools 并设置环境变量 MONGO_TOOLS_DIR 指向其 bin 目录`,
   )
 }
 

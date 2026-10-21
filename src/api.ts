@@ -359,7 +359,22 @@ export type ImportHistoryItem = {
   durationMs: number
 }
 
-function downloadBlob(blob: Blob, filename: string) {
+async function downloadBlob(blob: Blob, filename: string) {
+  const isTauri =
+    typeof window !== 'undefined' &&
+    ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
+  if (isTauri) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const data = new Uint8Array(await blob.arrayBuffer())
+    const saved = await invoke<string | null>('save_export_file', {
+      fileName: filename,
+      data,
+    })
+    if (!saved) {
+      throw new Error('已取消保存')
+    }
+    return
+  }
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
