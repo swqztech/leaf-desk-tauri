@@ -59,6 +59,7 @@
 
 .connect-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
 }
 
@@ -384,12 +385,55 @@
 }
 
 .nav-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
   padding: 0.4rem 0.5rem;
   font-size: 0.68rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--sidebar-muted);
   font-weight: 600;
+}
+
+.nav-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sidebar-muted);
+  cursor: pointer;
+}
+
+.nav-refresh:hover:not(:disabled) {
+  background: var(--sidebar-active);
+  color: var(--sidebar-text, #e8efe9);
+}
+
+.nav-refresh:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.nav-refresh svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.nav-refresh.busy svg {
+  animation: nav-spin 0.8s linear infinite;
+}
+
+@keyframes nav-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .db-row {

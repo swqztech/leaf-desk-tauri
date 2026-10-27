@@ -356,29 +356,54 @@ export default function App() {
     }
   }
 
-  const importDatabaseFromFile = async (file: File) => {
-    if (!selectedDb) {
-      toast.error('请先选择要导入到的数据库（左侧点开库名后再导入）')
-      return
-    }
+  const guessDbFromFileName = (fileName: string) => {
+    const base = fileName.replace(/\.(zip|gz|archive)$/i, '')
+    const matched = base.match(/^(.+)_bson_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/)
+    const name = matched?.[1]?.trim()
+    if (!name || !/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(name)) return null
+    return name
+  }
 
+  const importDatabaseFromFile = async (file: File) => {
     const sourcePath =
       typeof window.api?.getPathForFile === 'function'
         ? window.api.getPathForFile(file)
         : ''
 
+    let targetDb = selectedDb
+    const guessed = guessDbFromFileName(file.name)
+    if (!targetDb) {
+      targetDb = guessed
+      if (!targetDb) {
+        const typed = await dialog.prompt({
+          title: '导入到新数据库',
+          message: `文件：${file.name}\n\n文件名里没有库名。请输入要创建的数据库名（MongoDB 会在导入时自动建库）。`,
+          placeholder: '例如 swap',
+          confirmLabel: '继续',
+        })
+        const name = typed?.trim() ?? ''
+        if (!name) return
+        if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(name)) {
+          toast.error('数据库名需以字母或下划线开头，只能包含字母、数字、下划线、点和连字符')
+          return
+        }
+        targetDb = name
+      }
+    }
+
+    const creating = !databases.some((db) => db.name === targetDb)
     const mode = await dialog.choose({
-      title: `导入到「${selectedDb}」`,
-      message: `文件：${file.name}${sourcePath ? `\n路径：${sourcePath}` : ''}\n\n支持宝塔 bson 备份 / mongodump zip。导入后会归档一份到本机，可在「导入记录」查看。`,
+      title: creating ? `创建并导入「${targetDb}」` : `导入到「${targetDb}」`,
+      message: `文件：${file.name}${sourcePath ? `\n路径：${sourcePath}` : ''}\n目标库：${targetDb}${creating ? '（当前不存在，导入时会创建）' : ''}${guessed && guessed !== targetDb ? `\n备份中的库名：${guessed}` : ''}\n\n支持宝塔 bson 备份 / mongodump zip。导入后会归档一份到本机，可在「导入记录」查看。`,
       options: [
-        { id: 'merge', label: '合并导入', primary: true },
+        { id: 'merge', label: creating ? '创建并导入' : '合并导入', primary: true },
         { id: 'replace', label: '覆盖导入', danger: true },
       ],
     })
     if (!mode) return
 
     setIoBusy(true)
-    setIoLabel(`正在导入到「${selectedDb}」`)
+    setIoLabel(creating ? `正在创建并导入「${targetDb}」` : `正在导入到「${targetDb}」`)
     try {
       const head = new Uint8Array(await file.slice(0, 2).arrayBuffer())
       const isZip = head[0] === 0x50 && head[1] === 0x4b
@@ -389,7 +414,7 @@ export default function App() {
         )
       }
       const result = await api.importDatabase(
-        selectedDb,
+        targetDb,
         file,
         mode === 'replace' ? 'replace' : 'merge',
         sourcePath,
@@ -400,13 +425,25 @@ export default function App() {
           ? `导入完成（${result.format}，${result.mode === 'replace' ? '覆盖' : '合并'}）\n已归档：${archived}`
           : `导入完成（${result.format}，${result.mode === 'replace' ? '覆盖' : '合并'}）`,
       )
-      const { collections: list } = await api.collections(selectedDb)
-      setCollections(list)
-      if (selectedColl) {
-        await Promise.all([
-          loadDocuments(selectedDb, selectedColl, 0, order, activeQuery),
-          loadIndexes(selectedDb, selectedColl),
-        ])
+      const { databases: dbList } = await api.databases()
+      setDatabases(dbList)
+      if (selectedDb === targetDb) {
+        const { collections: list } = await api.collections(targetDb)
+        setCollections(list)
+        if (selectedColl) {
+          await Promise.all([
+            loadDocuments(targetDb, selectedColl, 0, order, activeQuery),
+            loadIndexes(targetDb, selectedColl),
+          ])
+        }
+      } else {
+        setSelectedDb(targetDb)
+        setSelectedColl(null)
+        setDocs(null)
+        setIndexes([])
+        setPage(0)
+        const { collections: list } = await api.collections(targetDb)
+        setCollections(list)
       }
     } catch (err) {
       toast.error(err)
@@ -1088,7 +1125,7 @@ export default function App() {
             <p>
               {selectedDb
                 ? `将导入到数据库「${selectedDb}」`
-                : '请先在左侧选中目标数据库'}
+                : '未选中数据库时，按备份文件名创建新库并导入'}
             </p>
             <p className="dim">支持 .zip / .gz / 宝塔 _bson_ 备份</p>
           </div>
@@ -1121,6 +1158,15 @@ export default function App() {
               title="查看曾导入的备份归档位置"
             >
               导入记录
+            </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              disabled={ioBusy || !connected}
+              title="导入宝塔 bson / mongodump 备份。没选中库时，按文件名创建新数据库"
+              onClick={() => importInputRef.current?.click()}
+            >
+              导入库
             </button>
           </div>
           <div className="status">
@@ -1164,7 +1210,33 @@ export default function App() {
         )}
 
         <div className="nav-scroll">
-          <div className="nav-label">数据库</div>
+          <div className="nav-label">
+            <span>数据库</span>
+            <button
+              className={`nav-refresh ${loadingNav ? 'busy' : ''}`}
+              type="button"
+              title="刷新数据库列表"
+              aria-label="刷新数据库列表"
+              disabled={!connected || loadingNav}
+              onClick={() => void loadDatabases()}
+            >
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M20 12a8 8 0 1 1-2.2-5.5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M20 4v5h-5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
           {databases.length === 0 && !loadingNav && (
             <p style={{ padding: '0.5rem', fontSize: '0.8rem', color: 'var(--sidebar-muted)' }}>
               {statusError || '暂无用户数据库'}

@@ -22,7 +22,10 @@ type PromptRequest = {
   type: 'prompt'
   title: string
   message: string
-  expected: string
+  /** 有值时必须原样输入才可确认；留空则作为自由输入 */
+  expected?: string
+  placeholder?: string
+  initial?: string
   confirmLabel?: string
   cancelLabel?: string
   danger?: boolean
@@ -67,7 +70,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         }),
       prompt: (opts) =>
         new Promise((resolve) => {
-          setTyped('')
+          setTyped(opts.initial ?? '')
           setReq({ ...opts, type: 'prompt', resolve })
           queueMicrotask(() => inputRef.current?.focus())
         }),
@@ -106,7 +109,11 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   }
 
   const promptReady =
-    req?.type === 'prompt' ? typed.trim() === req.expected : false
+    req?.type === 'prompt'
+      ? req.expected
+        ? typed.trim() === req.expected
+        : typed.trim().length > 0
+      : false
 
   return (
     <DialogContext.Provider value={api}>
@@ -135,13 +142,19 @@ export function DialogProvider({ children }: { children: ReactNode }) {
               {req.type === 'prompt' && (
                 <label className="dialog-prompt">
                   <span>
-                    请输入 <code>{req.expected}</code> 以确认
+                    {req.expected ? (
+                      <>
+                        请输入 <code>{req.expected}</code> 以确认
+                      </>
+                    ) : (
+                      '数据库名'
+                    )}
                   </span>
                   <input
                     ref={inputRef}
                     value={typed}
                     spellCheck={false}
-                    placeholder={req.expected}
+                    placeholder={req.placeholder || req.expected || ''}
                     onChange={(e) => setTyped(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && promptReady) promptOk()
