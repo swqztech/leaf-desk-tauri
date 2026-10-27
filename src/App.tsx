@@ -370,38 +370,29 @@ export default function App() {
         ? window.api.getPathForFile(file)
         : ''
 
-    let targetDb = selectedDb
     const guessed = guessDbFromFileName(file.name)
-    if (!targetDb) {
-      targetDb = guessed
-      if (!targetDb) {
-        const typed = await dialog.prompt({
-          title: '导入到新数据库',
-          message: `文件：${file.name}\n\n文件名里没有库名。请输入要创建的数据库名（MongoDB 会在导入时自动建库）。`,
-          placeholder: '例如 swap',
-          confirmLabel: '继续',
-        })
-        const name = typed?.trim() ?? ''
-        if (!name) return
-        if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(name)) {
-          toast.error('数据库名需以字母或下划线开头，只能包含字母、数字、下划线、点和连字符')
-          return
-        }
-        targetDb = name
-      }
-    }
-
-    const creating = !databases.some((db) => db.name === targetDb)
-    const mode = await dialog.choose({
-      title: creating ? `创建并导入「${targetDb}」` : `导入到「${targetDb}」`,
-      message: `文件：${file.name}${sourcePath ? `\n路径：${sourcePath}` : ''}\n目标库：${targetDb}${creating ? '（当前不存在，导入时会创建）' : ''}${guessed && guessed !== targetDb ? `\n备份中的库名：${guessed}` : ''}\n\n支持宝塔 bson 备份 / mongodump zip。导入后会归档一份到本机，可在「导入记录」查看。`,
+    const picked = await dialog.choose({
+      title: '导入备份',
+      message: `文件：${file.name}${sourcePath ? `\n路径：${sourcePath}` : ''}\n备份中的库名：${guessed || '未从文件名识别'}\n\n支持宝塔 bson 备份 / mongodump zip。导入后会归档一份到本机，可在「导入记录」查看。`,
+      field: {
+        label: '写入数据库',
+        initial: selectedDb || guessed || '',
+        placeholder: '例如 swap_copy',
+      },
       options: [
-        { id: 'merge', label: creating ? '创建并导入' : '合并导入', primary: true },
+        { id: 'merge', label: '合并导入', primary: true },
         { id: 'replace', label: '覆盖导入', danger: true },
       ],
     })
-    if (!mode) return
+    if (!picked) return
+    const targetDb = picked.value.trim()
+    const mode = picked.id
+    if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(targetDb)) {
+      toast.error('数据库名需以字母或下划线开头，只能包含字母、数字、下划线、点和连字符')
+      return
+    }
 
+    const creating = !databases.some((db) => db.name === targetDb)
     setIoBusy(true)
     setIoLabel(creating ? `正在创建并导入「${targetDb}」` : `正在导入到「${targetDb}」`)
     try {

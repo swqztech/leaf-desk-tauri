@@ -38,7 +38,9 @@ type ChooseRequest = {
   message: string
   options: { id: string; label: string; danger?: boolean; primary?: boolean }[]
   cancelLabel?: string
-  resolve: (id: string | null) => void
+  /** 选项确认前可编辑的文本，例如目标数据库名 */
+  field?: { label: string; initial?: string; placeholder?: string }
+  resolve: (result: { id: string; value: string } | null) => void
 }
 
 type DialogRequest = ConfirmRequest | PromptRequest | ChooseRequest
@@ -46,7 +48,9 @@ type DialogRequest = ConfirmRequest | PromptRequest | ChooseRequest
 type DialogApi = {
   confirm: (opts: Omit<ConfirmRequest, 'type' | 'resolve'>) => Promise<boolean>
   prompt: (opts: Omit<PromptRequest, 'type' | 'resolve'>) => Promise<string | null>
-  choose: (opts: Omit<ChooseRequest, 'type' | 'resolve'>) => Promise<string | null>
+  choose: (
+    opts: Omit<ChooseRequest, 'type' | 'resolve'>,
+  ) => Promise<{ id: string; value: string } | null>
 }
 
 const DialogContext = createContext<DialogApi | null>(null)
@@ -76,8 +80,9 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         }),
       choose: (opts) =>
         new Promise((resolve) => {
-          setTyped('')
+          setTyped(opts.field?.initial ?? '')
           setReq({ ...opts, type: 'choose', resolve })
+          if (opts.field) queueMicrotask(() => inputRef.current?.focus())
         }),
     }),
     [],
@@ -102,9 +107,16 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     close()
   }
 
+  const chooseValueOk = (value: string, field?: ChooseRequest['field']) => {
+    const text = value.trim()
+    if (!field) return true
+    return /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(text)
+  }
+
   const chooseOk = (id: string) => {
     if (!req || req.type !== 'choose') return
-    req.resolve(id)
+    if (!chooseValueOk(typed, req.field)) return
+    req.resolve({ id, value: typed.trim() })
     close()
   }
 
@@ -138,6 +150,28 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 
             <div className="dialog-body">
               <p className="dialog-message">{req.message}</p>
+
+              {req.type === 'choose' && req.field && (
+                <label className="dialog-prompt">
+                  <span>{req.field.label}</span>
+                  <input
+                    ref={inputRef}
+                    value={typed}
+                    spellCheck={false}
+                    placeholder={req.field.placeholder || ''}
+                    onChange={(e) => setTyped(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') cancel()
+                      if (e.key === 'Enter' && chooseValueOk(typed, req.field)) {
+                        const primary =
+                          req.options.find((opt) => opt.primary) || req.options[0]
+                        if (primary) chooseOk(primary.id)
+                      }
+                    }}
+                  />
+                  <span>可改成其他库名。库不存在时会在导入时自动创建。</span>
+                </label>
+              )}
 
               {req.type === 'prompt' && (
                 <label className="dialog-prompt">
@@ -201,6 +235,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                             : 'btn-light'
                       }`}
                       type="button"
+                      disabled={!chooseValueOk(typed, req.field)}
                       onClick={() => chooseOk(opt.id)}
                     >
                       {opt.label}
