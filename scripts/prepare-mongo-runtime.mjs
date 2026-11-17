@@ -17,7 +17,8 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const NODE_VERSION = 'v20.18.0'
 const MONGO_TOOLS_VERSION = '100.16.0'
 const destDir = path.join(root, 'src-tauri', 'resources', 'mongo-api')
-const nodeExe = path.join(destDir, 'node.exe')
+const nodeBinName = process.platform === 'win32' ? 'node.exe' : 'node'
+const nodeExe = path.join(destDir, nodeBinName)
 const toolsBinDir = path.join(destDir, 'tools', 'bin')
 const mongodumpExe = path.join(toolsBinDir, 'mongodump.exe')
 const serverSrc = path.join(root, 'mongo-server', 'dist', 'server.cjs')
@@ -117,27 +118,56 @@ if (!existsSync(path.join(destDir, 'node_modules', 'mongodb'))) {
 
 await ensureMongoDatabaseTools()
 
-if (existsSync(nodeExe)) {
-  console.log('Portable node.exe already present.')
-  process.exit(0)
+async function ensurePortableNode() {
+  if (existsSync(nodeExe)) {
+    console.log(`Portable ${nodeBinName} already present.`)
+    return
+  }
+
+  if (process.platform === 'win32') {
+    const zipName = `node-${NODE_VERSION}-win-x64.zip`
+    const url = `https://nodejs.org/dist/${NODE_VERSION}/${zipName}`
+    const zipPath = path.join(destDir, zipName)
+    const extractDir = path.join(destDir, '_extract')
+    console.log('Downloading', url)
+    await downloadFile(url, zipPath)
+    mkdirSync(extractDir, { recursive: true })
+    execSync(
+      `powershell -NoProfile -Command "Expand-Archive -Force -Path ${psQuote(zipPath)} -DestinationPath ${psQuote(extractDir)}"`,
+      { stdio: 'inherit' },
+    )
+    copyFileSync(path.join(extractDir, `node-${NODE_VERSION}-win-x64`, 'node.exe'), nodeExe)
+    execSync(
+      `powershell -NoProfile -Command "Remove-Item -Recurse -Force ${psQuote(zipPath)}, ${psQuote(extractDir)}"`,
+      { stdio: 'inherit' },
+    )
+    return
+  }
+
+  if (process.platform === 'darwin') {
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+    const tarName = `node-${NODE_VERSION}-darwin-${arch}.tar.gz`
+    const url = `https://nodejs.org/dist/${NODE_VERSION}/${tarName}`
+    const tarPath = path.join(destDir, tarName)
+    const extractDir = path.join(destDir, '_extract')
+    console.log('Downloading', url)
+    await downloadFile(url, tarPath)
+    mkdirSync(extractDir, { recursive: true })
+    execSync(`tar -xzf ${JSON.stringify(tarPath)} -C ${JSON.stringify(extractDir)}`, {
+      stdio: 'inherit',
+    })
+    const inner = path.join(extractDir, `node-${NODE_VERSION}-darwin-${arch}`, 'bin', 'node')
+    copyFileSync(inner, nodeExe)
+    execSync(`chmod +x ${JSON.stringify(nodeExe)}`, { stdio: 'inherit' })
+    execSync(`rm -rf ${JSON.stringify(tarPath)} ${JSON.stringify(extractDir)}`, {
+      stdio: 'inherit',
+    })
+    return
+  }
+
+  console.error('当前平台请自行将 Node 可执行文件放到', nodeExe)
+  process.exit(1)
 }
 
-const zipName = `node-${NODE_VERSION}-win-x64.zip`
-const url = `https://nodejs.org/dist/${NODE_VERSION}/${zipName}`
-const zipPath = path.join(destDir, zipName)
-const extractDir = path.join(destDir, '_extract')
-console.log('Downloading', url)
-
-await downloadFile(url, zipPath)
-
-mkdirSync(extractDir, { recursive: true })
-execSync(
-  `powershell -NoProfile -Command "Expand-Archive -Force -Path ${psQuote(zipPath)} -DestinationPath ${psQuote(extractDir)}"`,
-  { stdio: 'inherit' },
-)
-copyFileSync(path.join(extractDir, `node-${NODE_VERSION}-win-x64`, 'node.exe'), nodeExe)
-execSync(
-  `powershell -NoProfile -Command "Remove-Item -Recurse -Force ${psQuote(zipPath)}, ${psQuote(extractDir)}"`,
-  { stdio: 'inherit' },
-)
+await ensurePortableNode()
 console.log('mongo-api runtime ready')

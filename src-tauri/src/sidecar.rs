@@ -40,6 +40,18 @@ fn bundled_mongo_api_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join("mongo-api")
 }
 
+fn bundled_node_file_name() -> &'static str {
+    if cfg!(windows) {
+        "node.exe"
+    } else {
+        "node"
+    }
+}
+
+fn bundled_node_path(dir: &Path) -> PathBuf {
+    dir.join(bundled_node_file_name())
+}
+
 pub fn spawn_mongo_api(app: &AppHandle) -> Result<(), String> {
     let data = leaf_data_dir();
     let _ = std::fs::create_dir_all(&data);
@@ -49,7 +61,7 @@ pub fn spawn_mongo_api(app: &AppHandle) -> Result<(), String> {
             resource_dir.join("mongo-api"),
             resource_dir.join("resources").join("mongo-api"),
         ] {
-            let node = api_dir.join("node.exe");
+            let node = bundled_node_path(&api_dir);
             let script = api_dir.join("server.cjs");
             if node.is_file() && script.is_file() {
                 return spawn_node_process(&node, &script, &api_dir, &data);
@@ -64,11 +76,12 @@ pub fn spawn_mongo_api(app: &AppHandle) -> Result<(), String> {
     }
     let node = which_node()?;
     let bundled_api = bundled_mongo_api_dir();
-    let (node, script, cwd) = if bundled_api.join("node.exe").is_file()
+    let bundled_node = bundled_node_path(&bundled_api);
+    let (node, script, cwd) = if bundled_node.is_file()
         && bundled_api.join("server.cjs").is_file()
     {
         (
-            bundled_api.join("node.exe"),
+            bundled_node,
             bundled_api.join("server.cjs"),
             bundled_api.clone(),
         )
@@ -79,21 +92,43 @@ pub fn spawn_mongo_api(app: &AppHandle) -> Result<(), String> {
 }
 
 fn which_node() -> Result<PathBuf, String> {
-    let node = Command::new("where")
-        .arg("node")
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                String::from_utf8(o.stdout)
-                    .ok()
-                    .and_then(|s| s.lines().next().map(|l| PathBuf::from(l.trim())))
-            } else {
-                None
-            }
-        });
-    node.filter(|p| p.is_file())
-        .ok_or_else(|| "Node.js not found on PATH (required for dev).".into())
+    #[cfg(windows)]
+    {
+        let node = Command::new("where")
+            .arg("node")
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8(o.stdout)
+                        .ok()
+                        .and_then(|s| s.lines().next().map(|l| PathBuf::from(l.trim())))
+                } else {
+                    None
+                }
+            });
+        return node
+            .filter(|p| p.is_file())
+            .ok_or_else(|| "Node.js not found on PATH (required for dev).".into());
+    }
+    #[cfg(not(windows))]
+    {
+        let node = Command::new("which")
+            .arg("node")
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8(o.stdout)
+                        .ok()
+                        .and_then(|s| s.lines().next().map(|l| PathBuf::from(l.trim())))
+                } else {
+                    None
+                }
+            });
+        node.filter(|p| p.is_file())
+            .ok_or_else(|| "Node.js not found on PATH (required for dev).".into())
+    }
 }
 
 fn spawn_node_process(
