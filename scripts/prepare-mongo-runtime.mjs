@@ -20,7 +20,10 @@ const destDir = path.join(root, 'src-tauri', 'resources', 'mongo-api')
 const nodeBinName = process.platform === 'win32' ? 'node.exe' : 'node'
 const nodeExe = path.join(destDir, nodeBinName)
 const toolsBinDir = path.join(destDir, 'tools', 'bin')
-const mongodumpExe = path.join(toolsBinDir, 'mongodump.exe')
+const mongodumpMarker = path.join(
+  toolsBinDir,
+  process.platform === 'win32' ? 'mongodump.exe' : 'mongodump',
+)
 const serverSrc = path.join(root, 'mongo-server', 'dist', 'server.cjs')
 const serverDest = path.join(destDir, 'server.cjs')
 
@@ -52,45 +55,77 @@ function psQuote(value) {
   return `'${value.replace(/'/g, "''")}'`
 }
 
-async function ensureMongoDatabaseTools() {
-  if (process.platform !== 'win32') {
-    console.log('MongoDB Database Tools 自动下载仅支持 Windows，请自行安装并配置 PATH 或 MONGO_TOOLS_DIR')
-    return
-  }
-  if (existsSync(mongodumpExe)) {
-    console.log('MongoDB Database Tools 已就绪。')
-    return
-  }
-
-  const zipName = `mongodb-database-tools-windows-x86_64-${MONGO_TOOLS_VERSION}.zip`
-  const url = `https://fastdl.mongodb.org/tools/db/${zipName}`
-  const zipPath = path.join(destDir, zipName)
-  const extractDir = path.join(destDir, '_tools_extract')
-  console.log('正在下载 MongoDB Database Tools…', url)
-  await downloadFile(url, zipPath)
-
-  mkdirSync(extractDir, { recursive: true })
-  execSync(
-    `powershell -NoProfile -Command "Expand-Archive -Force -Path ${psQuote(zipPath)} -DestinationPath ${psQuote(extractDir)}"`,
-    { stdio: 'inherit' },
-  )
-
+function installToolsBinFromExtract(extractDir, markerName) {
   const top = readdirSync(extractDir, { withFileTypes: true }).find((e) => e.isDirectory())
   if (!top) {
     throw new Error('解压 MongoDB Tools 失败：未找到目录')
   }
   const srcBin = path.join(extractDir, top.name, 'bin')
-  if (!existsSync(path.join(srcBin, 'mongodump.exe'))) {
-    throw new Error(`解压 MongoDB Tools 失败：${srcBin} 内无 mongodump.exe`)
+  if (!existsSync(path.join(srcBin, markerName))) {
+    throw new Error(`解压 MongoDB Tools 失败：${srcBin} 内无 ${markerName}`)
   }
   mkdirSync(toolsBinDir, { recursive: true })
   cpSync(srcBin, toolsBinDir, { recursive: true })
+  if (process.platform !== 'win32') {
+    for (const name of readdirSync(toolsBinDir)) {
+      const bin = path.join(toolsBinDir, name)
+      try {
+        execSync(`chmod +x ${JSON.stringify(bin)}`, { stdio: 'ignore' })
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
 
-  execSync(
-    `powershell -NoProfile -Command "Remove-Item -Recurse -Force ${psQuote(zipPath)}, ${psQuote(extractDir)}"`,
-    { stdio: 'inherit' },
-  )
-  console.log('MongoDB Database Tools 已安装到', toolsBinDir)
+async function ensureMongoDatabaseTools() {
+  if (existsSync(mongodumpMarker)) {
+    console.log('MongoDB Database Tools 已就绪。')
+    return
+  }
+
+  if (process.platform === 'win32') {
+    const zipName = `mongodb-database-tools-windows-x86_64-${MONGO_TOOLS_VERSION}.zip`
+    const url = `https://fastdl.mongodb.org/tools/db/${zipName}`
+    const zipPath = path.join(destDir, zipName)
+    const extractDir = path.join(destDir, '_tools_extract')
+    console.log('正在下载 MongoDB Database Tools…', url)
+    await downloadFile(url, zipPath)
+    mkdirSync(extractDir, { recursive: true })
+    execSync(
+      `powershell -NoProfile -Command "Expand-Archive -Force -Path ${psQuote(zipPath)} -DestinationPath ${psQuote(extractDir)}"`,
+      { stdio: 'inherit' },
+    )
+    installToolsBinFromExtract(extractDir, 'mongodump.exe')
+    execSync(
+      `powershell -NoProfile -Command "Remove-Item -Recurse -Force ${psQuote(zipPath)}, ${psQuote(extractDir)}"`,
+      { stdio: 'inherit' },
+    )
+    console.log('MongoDB Database Tools 已安装到', toolsBinDir)
+    return
+  }
+
+  if (process.platform === 'darwin') {
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x86_64'
+    const zipName = `mongodb-database-tools-macos-${arch}-${MONGO_TOOLS_VERSION}.zip`
+    const url = `https://fastdl.mongodb.org/tools/db/${zipName}`
+    const zipPath = path.join(destDir, zipName)
+    const extractDir = path.join(destDir, '_tools_extract')
+    console.log('正在下载 MongoDB Database Tools…', url)
+    await downloadFile(url, zipPath)
+    mkdirSync(extractDir, { recursive: true })
+    execSync(`unzip -q -o ${JSON.stringify(zipPath)} -d ${JSON.stringify(extractDir)}`, {
+      stdio: 'inherit',
+    })
+    installToolsBinFromExtract(extractDir, 'mongodump')
+    execSync(`rm -rf ${JSON.stringify(zipPath)} ${JSON.stringify(extractDir)}`, {
+      stdio: 'inherit',
+    })
+    console.log('MongoDB Database Tools 已安装到', toolsBinDir)
+    return
+  }
+
+  console.log('当前平台未自动下载 Database Tools，请设置 MONGO_TOOLS_DIR 或安装 mongodump 到 PATH')
 }
 
 mkdirSync(destDir, { recursive: true })

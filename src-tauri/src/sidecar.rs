@@ -131,6 +131,29 @@ fn which_node() -> Result<PathBuf, String> {
     }
 }
 
+fn augment_path_for_mongo_tools(cmd: &mut Command, tools_bin: Option<&Path>) {
+    #[cfg(target_os = "macos")]
+    {
+        let mut prefix: Vec<String> = Vec::new();
+        if let Some(bin) = tools_bin {
+            prefix.push(bin.to_string_lossy().into_owned());
+        }
+        prefix.push("/opt/homebrew/bin".into());
+        prefix.push("/usr/local/bin".into());
+        let current = std::env::var("PATH").unwrap_or_default();
+        let merged = if current.is_empty() {
+            prefix.join(":")
+        } else {
+            format!("{}:{}", prefix.join(":"), current)
+        };
+        cmd.env("PATH", merged);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (cmd, tools_bin);
+    }
+}
+
 fn spawn_node_process(
     node: &Path,
     script: &Path,
@@ -138,6 +161,7 @@ fn spawn_node_process(
     data_dir: &Path,
 ) -> Result<(), String> {
     let mut cmd = Command::new(node);
+    let tools_bin = mongo_tools_bin_dir(cwd);
     cmd.current_dir(cwd)
         .arg(script)
         .env("PORT", "3001")
@@ -145,9 +169,10 @@ fn spawn_node_process(
         .env("LEAF_DESK_DATA", data_dir)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    if let Some(tools_bin) = mongo_tools_bin_dir(cwd) {
-        cmd.env("MONGO_TOOLS_DIR", tools_bin);
+    if let Some(ref bin) = tools_bin {
+        cmd.env("MONGO_TOOLS_DIR", bin);
     }
+    augment_path_for_mongo_tools(&mut cmd, tools_bin.as_deref());
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
 

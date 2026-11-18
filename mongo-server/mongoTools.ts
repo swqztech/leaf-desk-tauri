@@ -156,6 +156,11 @@ export async function resolveMongoTool(tool: 'mongodump' | 'mongorestore') {
       path.join('C:\\mongodb\\bin', exeName),
     )
   }
+  if (process.platform === 'darwin') {
+    for (const binDir of ['/opt/homebrew/bin', '/usr/local/bin']) {
+      candidates.push(path.join(binDir, exeName))
+    }
+  }
 
   for (const item of candidates) {
     const hit = await pathIfExists(item)
