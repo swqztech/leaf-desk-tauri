@@ -328,17 +328,34 @@ export default function App() {
     })
   }
 
+  const chooseBackupFormat = (title: string, name: string) =>
+    dialog.choose({
+      title,
+      message: `导出「${name}」。\n宝塔是 zip，1Panel 是 mongodump 的 .gz，两边都能导回来。`,
+      options: [
+        { id: 'baota', label: '宝塔 zip', primary: true },
+        { id: '1panel', label: '1Panel gz' },
+      ],
+    })
+
   const exportDatabase = async (db: string) => {
-  if (ioBusy) {
+    if (ioBusy) {
       toast.warning('正在导入/导出，请稍候')
       return
     }
+    const picked = await chooseBackupFormat('导出数据库', db)
+    if (!picked) return
+    const format = picked.id === '1panel' ? '1panel' : 'baota'
     setIoBusy(true)
     setIoLabel(`正在导出数据库「${db}」`)
     try {
-      const { blob, fileName } = await api.exportDatabase(db)
+      const { blob, fileName } = await api.exportDatabase(db, format)
       await downloadBlob(blob, fileName)
-      toast.success(`已导出数据库「${db}」（宝塔兼容 zip）：${fileName}`)
+      toast.success(
+        format === '1panel'
+          ? `已导出数据库「${db}」（1Panel gz）：${fileName}`
+          : `已导出数据库「${db}」（宝塔兼容 zip）：${fileName}`,
+      )
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       toast.error(
@@ -352,12 +369,19 @@ export default function App() {
   }
 
   const exportCollection = async (db: string, coll: string) => {
+    const picked = await chooseBackupFormat('导出集合', `${db}.${coll}`)
+    if (!picked) return
+    const format = picked.id === '1panel' ? '1panel' : 'baota'
     setIoBusy(true)
     setIoLabel(`正在导出集合「${db}.${coll}」`)
     try {
-      const { blob, fileName } = await api.exportCollection(db, coll)
+      const { blob, fileName } = await api.exportCollection(db, coll, format)
       await downloadBlob(blob, fileName)
-      toast.success(`已导出集合「${db}.${coll}」（宝塔兼容 zip）：${fileName}`)
+      toast.success(
+        format === '1panel'
+          ? `已导出集合「${db}.${coll}」（1Panel gz）：${fileName}`
+          : `已导出集合「${db}.${coll}」（宝塔兼容 zip）：${fileName}`,
+      )
     } catch (err) {
       toast.error(err)
     } finally {
@@ -366,9 +390,10 @@ export default function App() {
   }
 
   const guessDbFromFileName = (fileName: string) => {
-    const base = fileName.replace(/\.(zip|gz|archive)$/i, '')
-    const matched = base.match(/^(.+)_bson_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/)
-    const name = matched?.[1]?.trim()
+    const base = fileName.replace(/\.(zip|gz|gzip|archive)$/i, '')
+    const baota = base.match(/^(.+)_bson_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/)
+    const onePanel = base.match(/^(.+)_(\d{14})([A-Za-z0-9]{3,8})?$/)
+    const name = (baota?.[1] || onePanel?.[1])?.trim()
     if (!name || !/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(name)) return null
     return name
   }
@@ -382,7 +407,7 @@ export default function App() {
     const guessed = guessDbFromFileName(file.name)
     const picked = await dialog.choose({
       title: '导入备份',
-      message: `文件：${file.name}${sourcePath ? `\n路径：${sourcePath}` : ''}\n备份中的库名：${guessed || '未从文件名识别'}\n\n支持宝塔 bson 备份 / mongodump zip。导入后会归档一份到本机，可在「导入记录」查看。`,
+      message: `文件：${file.name}${sourcePath ? `\n路径：${sourcePath}` : ''}\n备份中的库名：${guessed || '未从文件名识别'}\n\n支持宝塔 bson zip，以及 1Panel 的 mongodump .gz。导入后会归档一份到本机，可在「导入记录」查看。`,
       field: {
         label: '写入数据库',
         initial: selectedDb || guessed || '',
@@ -410,7 +435,7 @@ export default function App() {
       const isGzip = head[0] === 0x1f && head[1] === 0x8b
       if (!isZip && !isGzip && !/_bson_/i.test(file.name)) {
         throw new Error(
-          '请选择宝塔 MongoDB 备份（含 _bson_ 的文件）或 Leaf Desk 导出的 .zip',
+          '请选择宝塔 MongoDB 备份（zip / 含 _bson_）或 1Panel 的 .gz',
         )
       }
       const result = await api.importDatabase(
@@ -420,10 +445,16 @@ export default function App() {
         sourcePath,
       )
       const archived = result.history?.archivedPath
+      const formatName =
+        result.format === '1panel-gzip'
+          ? '1Panel gz'
+          : result.format === 'bson-zip'
+            ? '宝塔 zip'
+            : result.format
       toast.success(
         archived
-          ? `导入完成（${result.format}，${result.mode === 'replace' ? '覆盖' : '合并'}）\n已归档：${archived}`
-          : `导入完成（${result.format}，${result.mode === 'replace' ? '覆盖' : '合并'}）`,
+          ? `导入完成（${formatName}，${result.mode === 'replace' ? '覆盖' : '合并'}）\n已归档：${archived}`
+          : `导入完成（${formatName}，${result.mode === 'replace' ? '覆盖' : '合并'}）`,
       )
       const { databases: dbList } = await api.databases()
       setDatabases(dbList)
@@ -1127,7 +1158,7 @@ export default function App() {
                 ? `将导入到数据库「${selectedDb}」`
                 : '未选中数据库时，按备份文件名创建新库并导入'}
             </p>
-            <p className="dim">支持 .zip / .gz / 宝塔 _bson_ 备份</p>
+            <p className="dim">支持宝塔 zip，以及 1Panel 的 .gz</p>
           </div>
         </div>
       )}
@@ -1163,7 +1194,7 @@ export default function App() {
               className="btn btn-ghost"
               type="button"
               disabled={ioBusy || !connected}
-              title="导入宝塔 bson / mongodump 备份。没选中库时，按文件名创建新数据库"
+              title="导入宝塔 zip 或 1Panel 的 .gz。没选中库时，按文件名创建新数据库"
               onClick={() => importInputRef.current?.click()}
             >
               导入库

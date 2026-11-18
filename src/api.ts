@@ -232,9 +232,9 @@ export const api = {
       },
     ),
 
-  exportDatabase: async (db: string) => {
+  exportDatabase: async (db: string, format: 'baota' | '1panel' = 'baota') => {
     const res = await fetch(
-      apiUrl(`/api/databases/${encodeURIComponent(db)}/export`),
+      apiUrl(`/api/databases/${encodeURIComponent(db)}/export?format=${format}`),
     )
     if (!res.ok) {
       const text = await res.text()
@@ -251,12 +251,20 @@ export const api = {
     const matched = disposition.match(/filename="?([^"]+)"?/i)
     const fileName = matched?.[1]
       ? decodeURIComponent(matched[1])
-      : `${db}_bson_backup_mc`
+      : format === '1panel'
+        ? `${db}.gz`
+        : `${db}_bson_backup_mc.zip`
     return { blob, fileName }
   },
 
-  exportCollection: async (db: string, coll: string) => {
-    const res = await fetch(apiUrl(`${collPath(db, coll)}/export`))
+  exportCollection: async (
+    db: string,
+    coll: string,
+    format: 'baota' | '1panel' = 'baota',
+  ) => {
+    const res = await fetch(
+      apiUrl(`${collPath(db, coll)}/export?format=${format}`),
+    )
     if (!res.ok) {
       const text = await res.text()
       let message = `导出失败 (${res.status})`
@@ -272,7 +280,9 @@ export const api = {
     const matched = disposition.match(/filename="?([^"]+)"?/i)
     const fileName = matched?.[1]
       ? decodeURIComponent(matched[1])
-      : `${db}_${coll}_bson_backup_mc`
+      : format === '1panel'
+        ? `${db}_${coll}.gz`
+        : `${db}_${coll}_bson_backup_mc.zip`
     return { blob, fileName }
   },
 

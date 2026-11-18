@@ -24,7 +24,11 @@ const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017'
 
 const app = express()
-app.use(cors())
+app.use(
+  cors({
+    exposedHeaders: ['Content-Disposition'],
+  }),
+)
 
 let client: MongoClient | null = null
 let currentUri = DEFAULT_URI
@@ -892,7 +896,8 @@ app.get('/api/databases/:db/export', async (req, res) => {
     }
 
     await ensureClient()
-    const file = await dumpDatabaseToFile(currentUri, dbName)
+    const format = req.query.format === '1panel' ? '1panel' : 'baota'
+    const file = await dumpDatabaseToFile(currentUri, dbName, format)
     res.setHeader('Content-Type', file.contentType)
     res.setHeader(
       'Content-Disposition',
@@ -916,7 +921,8 @@ app.get('/api/databases/:db/collections/:coll/export', async (req, res) => {
     }
 
     await ensureClient()
-    const file = await dumpCollectionToFile(currentUri, dbName, collName)
+    const format = req.query.format === '1panel' ? '1panel' : 'baota'
+    const file = await dumpCollectionToFile(currentUri, dbName, collName, format)
     res.setHeader('Content-Type', file.contentType)
     res.setHeader(
       'Content-Disposition',

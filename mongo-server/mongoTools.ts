@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process'
+import { randomInt } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import zlib from 'node:zlib'
 
 const execFileAsync = promisify(execFile)
 
@@ -37,11 +39,82 @@ export function btBackupFileName(db: string, coll?: string) {
   return `${db}_bson_${stamp}_mc.zip`
 }
 
-/** 从宝塔备份文件名解析源库名 */
+/** 1Panel 风格文件名：库名_YYYYMMDDHHmmss + 5 位随机.gz */
+export function onePanelBackupFileName(db: string, coll?: string) {
+  const d = new Date()
+  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let suffix = ''
+  for (let i = 0; i < 5; i++) suffix += alphabet[randomInt(alphabet.length)]
+  const prefix = coll ? `${db}_${coll}` : db
+  return `${prefix}_${stamp}${suffix}.gz`
+}
+
+function validDbName(name: string | undefined | null) {
+  return !!name && /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(name)
+}
+
+/** 从宝塔或 1Panel 备份文件名解析源库名 */
 export function parseSourceDbFromFileName(fileName: string) {
-  const base = path.basename(fileName).replace(/\.(zip|gz|archive)$/i, '')
-  const matched = base.match(/^(.+)_bson_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/)
-  return matched?.[1] ?? null
+  const base = path.basename(fileName).replace(/\.(zip|gz|gzip|archive)$/i, '')
+  const baota = base.match(/^(.+)_bson_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}/)
+  if (validDbName(baota?.[1])) return baota![1]
+  // 例如 wallet_20261111022547w0uov
+  const onePanel = base.match(/^(.+)_(\d{14})([A-Za-z0-9]{3,8})?$/)
+  if (validDbName(onePanel?.[1])) return onePanel![1]
+  return null
+}
+
+/** 从 mongodump --gzip --archive 的文件头读出库名 */
+export function readArchiveDbName(fileBuf: Buffer): Promise<string | null> {
+  if (!looksLikeGzip(fileBuf)) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    const gunzip = zlib.createGunzip()
+    const chunks: Buffer[] = []
+    let size = 0
+    let settled = false
+    const finish = (name: string | null) => {
+      if (settled) return
+      settled = true
+      gunzip.destroy()
+      resolve(name)
+    }
+    gunzip.on('data', (chunk: Buffer) => {
+      chunks.push(chunk)
+      size += chunk.length
+      if (size >= 8192) finish(extractDbFromPrelude(Buffer.concat(chunks)))
+    })
+    gunzip.on('end', () => finish(extractDbFromPrelude(Buffer.concat(chunks))))
+    gunzip.on('error', () => {
+      if (chunks.length) finish(extractDbFromPrelude(Buffer.concat(chunks)))
+      else finish(null)
+    })
+    gunzip.end(fileBuf.subarray(0, Math.min(fileBuf.length, 512 * 1024)))
+  })
+}
+
+function extractDbFromPrelude(buf: Buffer) {
+  const key = Buffer.from('db\0')
+  let from = 0
+  while (from < buf.length - 8) {
+    const idx = buf.indexOf(key, from)
+    if (idx <= 0) return null
+    if (buf[idx - 1] !== 0x02) {
+      from = idx + 1
+      continue
+    }
+    const len = buf.readInt32LE(idx + key.length)
+    if (len < 2 || len > 80 || idx + key.length + 4 + len > buf.length) {
+      from = idx + 1
+      continue
+    }
+    const name = buf
+      .subarray(idx + key.length + 4, idx + key.length + 4 + len - 1)
+      .toString('utf8')
+    if (validDbName(name)) return name
+    from = idx + 1
+  }
+  return null
 }
 
 async function pathIfExists(filePath: string) {
@@ -227,12 +300,38 @@ async function findDumpRoot(extractDir: string): Promise<string> {
   return extractDir
 }
 
+export type BackupFormat = 'baota' | '1panel'
+
 /**
- * 导出为宝塔同款 zip：
- * mongodump --out → zip，内含 {db}/*.bson + *.metadata.json
+ * 导出数据库。
+ * baota：zip，里面是 {库名}/*.bson，面板能直接恢复。
+ * 1panel：mongodump --gzip --archive，文件名像 wallet_20261111022547w0uov.gz。
  */
-export async function dumpDatabaseToFile(uri: string, db: string) {
+export async function dumpDatabaseToFile(
+  uri: string,
+  db: string,
+  format: BackupFormat = 'baota',
+) {
   const mongodump = await resolveMongoTool('mongodump')
+  if (format === '1panel') {
+    return withTempDir(async (dir) => {
+      const fileName = onePanelBackupFileName(db)
+      const archivePath = path.join(dir, fileName)
+      await runTool(mongodump, [
+        '--uri',
+        uri,
+        '--db',
+        db,
+        '--gzip',
+        `--archive=${archivePath}`,
+      ])
+      const data = await fs.readFile(archivePath)
+      if (!looksLikeGzip(data)) {
+        throw new Error('打包 1Panel 备份失败：生成文件不是 gzip')
+      }
+      return { fileName, data, contentType: 'application/gzip' }
+    })
+  }
   return withTempDir(async (dir) => {
     const dumpRoot = path.join(dir, 'dump')
     await fs.mkdir(dumpRoot, { recursive: true })
@@ -258,8 +357,30 @@ export async function dumpCollectionToFile(
   uri: string,
   db: string,
   coll: string,
+  format: BackupFormat = 'baota',
 ) {
   const mongodump = await resolveMongoTool('mongodump')
+  if (format === '1panel') {
+    return withTempDir(async (dir) => {
+      const fileName = onePanelBackupFileName(db, coll)
+      const archivePath = path.join(dir, fileName)
+      await runTool(mongodump, [
+        '--uri',
+        uri,
+        '--db',
+        db,
+        '--collection',
+        coll,
+        '--gzip',
+        `--archive=${archivePath}`,
+      ])
+      const data = await fs.readFile(archivePath)
+      if (!looksLikeGzip(data)) {
+        throw new Error('打包 1Panel 备份失败：生成文件不是 gzip')
+      }
+      return { fileName, data, contentType: 'application/gzip' }
+    })
+  }
   return withTempDir(async (dir) => {
     const dumpRoot = path.join(dir, 'dump')
     await fs.mkdir(dumpRoot, { recursive: true })
@@ -293,9 +414,11 @@ export async function restoreDatabaseFromBuffer(
   sourceDbHint?: string | null,
 ) {
   const mongorestore = await resolveMongoTool('mongorestore')
+  const archiveDb = looksLikeGzip(fileBuf) ? await readArchiveDbName(fileBuf) : null
 
   return withTempDir(async (dir) => {
     const dropArgs = mode === 'replace' ? ['--drop'] : []
+    const gzipSourceDb = archiveDb || sourceDbHint || targetDb
 
     if (looksLikeZip(fileBuf)) {
       const zipPath = path.join(dir, 'backup.zip')
@@ -345,12 +468,11 @@ export async function restoreDatabaseFromBuffer(
         '--gzip',
         `--archive=${archivePath}`,
       ]
-      const sourceDb = sourceDbHint || targetDb
-      if (sourceDb !== targetDb) {
-        args.push('--nsFrom', `${sourceDb}.*`, '--nsTo', `${targetDb}.*`)
+      if (gzipSourceDb !== targetDb) {
+        args.push('--nsFrom', `${gzipSourceDb}.*`, '--nsTo', `${targetDb}.*`)
       }
       await runTool(mongorestore, args)
-      return { ok: true as const, db: targetDb, mode, format: 'archive-gzip' }
+      return { ok: true as const, db: targetDb, mode, format: '1panel-gzip' }
     }
 
     // 宝塔下载有时无扩展名，先按 zip 再按 gzip 试
@@ -395,12 +517,11 @@ export async function restoreDatabaseFromBuffer(
         '--gzip',
         `--archive=${rawPath}`,
       ]
-      const sourceDb = sourceDbHint || targetDb
-      if (sourceDb !== targetDb) {
-        args.push('--nsFrom', `${sourceDb}.*`, '--nsTo', `${targetDb}.*`)
+      if (gzipSourceDb !== targetDb) {
+        args.push('--nsFrom', `${gzipSourceDb}.*`, '--nsTo', `${targetDb}.*`)
       }
       await runTool(mongorestore, args)
-      return { ok: true as const, db: targetDb, mode, format: 'archive-gzip' }
+      return { ok: true as const, db: targetDb, mode, format: '1panel-gzip' }
     }
   })
 }
