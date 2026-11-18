@@ -55,6 +55,40 @@ function psQuote(value) {
   return `'${value.replace(/'/g, "''")}'`
 }
 
+function copyToolsFromSystemBin() {
+  if (process.platform !== 'darwin') return false
+  const binDirs = ['/opt/homebrew/bin', '/usr/local/bin']
+  for (const dir of binDirs) {
+    const dump = path.join(dir, 'mongodump')
+    if (!existsSync(dump)) continue
+    mkdirSync(toolsBinDir, { recursive: true })
+    for (const name of readdirSync(dir)) {
+      if (
+        !name.startsWith('mongo') &&
+        name !== 'bsondump' &&
+        !name.startsWith('mongofiles')
+      ) {
+        continue
+      }
+      const src = path.join(dir, name)
+      try {
+        if (!existsSync(src)) continue
+        copyFileSync(src, path.join(toolsBinDir, name))
+        execSync(`chmod +x ${JSON.stringify(path.join(toolsBinDir, name))}`, {
+          stdio: 'ignore',
+        })
+      } catch {
+        // ignore single binary
+      }
+    }
+    if (existsSync(mongodumpMarker)) {
+      console.log('已从系统复制 MongoDB Database Tools 到', toolsBinDir)
+      return true
+    }
+  }
+  return false
+}
+
 function installToolsBinFromExtract(extractDir, markerName) {
   const top = readdirSync(extractDir, { withFileTypes: true }).find((e) => e.isDirectory())
   if (!top) {
@@ -106,6 +140,7 @@ async function ensureMongoDatabaseTools() {
   }
 
   if (process.platform === 'darwin') {
+    if (copyToolsFromSystemBin()) return
     const arch = process.arch === 'arm64' ? 'arm64' : 'x86_64'
     const zipName = `mongodb-database-tools-macos-${arch}-${MONGO_TOOLS_VERSION}.zip`
     const url = `https://fastdl.mongodb.org/tools/db/${zipName}`
