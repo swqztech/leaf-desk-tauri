@@ -329,6 +329,10 @@ export default function App() {
   }
 
   const exportDatabase = async (db: string) => {
+  if (ioBusy) {
+      toast.warning('正在导入/导出，请稍候')
+      return
+    }
     setIoBusy(true)
     setIoLabel(`正在导出数据库「${db}」`)
     try {
@@ -336,7 +340,12 @@ export default function App() {
       await downloadBlob(blob, fileName)
       toast.success(`已导出数据库「${db}」（宝塔兼容 zip）：${fileName}`)
     } catch (err) {
-      toast.error(err)
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(
+        msg.includes('未找到 mongodump')
+          ? `${msg}\n\n也可在终端执行：cd checklink-backend && bash scripts/export-db.sh`
+          : msg,
+      )
     } finally {
       setIoBusy(false)
     }

@@ -22,9 +22,9 @@ fn open_path(app: tauri::AppHandle, path: String) -> Result<bool, String> {
     Ok(true)
 }
 
-/// 导出备份：弹出保存对话框并写入 zip
+/// 导出备份：弹出保存对话框并写入 zip（同步 command，避免 async 里 blocking_save_file 卡死界面）
 #[tauri::command]
-async fn save_export_file(
+fn save_export_file(
     app: tauri::AppHandle,
     file_name: String,
     data: Vec<u8>,
